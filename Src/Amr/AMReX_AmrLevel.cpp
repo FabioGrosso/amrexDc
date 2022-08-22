@@ -31,6 +31,9 @@ EBSupport AmrLevel::m_eb_support_level = EBSupport::volume;
 DescriptorList AmrLevel::desc_lst;
 DeriveList     AmrLevel::derive_lst;
 
+Vector<MultiFab> multiMf(5);
+Vector<Geometry> multGeom(5);
+
 void
 AmrLevel::postCoarseTimeStep (Real time)
 {
@@ -321,6 +324,7 @@ AmrLevel::writePlotFile (const std::string& dir,
     int       cnt   = 0;
     const int nGrow = 0;
     MultiFab  plotMF(grids,dmap,n_data_items,nGrow,MFInfo(),Factory());
+    multiMf[level].define(grids,dmap,n_data_items,nGrow,MFInfo(),Factory());
     MultiFab* this_dat = 0;
     //
     // Cull data from state variables -- use no ghost cells.
@@ -331,8 +335,11 @@ AmrLevel::writePlotFile (const std::string& dir,
         int comp = plot_var_map[i].second;
         this_dat = &state[typ].newData();
         MultiFab::Copy(plotMF,*this_dat,comp,cnt,1,nGrow);
+        MultiFab::Copy(multiMf[level],*this_dat,comp,cnt,1,nGrow);
         cnt++;
     }
+
+    multGeom[level] = Geom();
 
     // derived
     if (derive_names.size() > 0)
@@ -352,6 +359,28 @@ AmrLevel::writePlotFile (const std::string& dir,
     }
 #endif
 
+    std::string dir_final = dir;
+    if(!amrex::AsyncOut::UseAsyncOut())
+    {
+        auto start_position_to_erase = dir_final.find(".temp");
+        dir_final.erase(start_position_to_erase,5);
+    }
+    std::string mt_final = dir_final + "_multi";
+    std::string compression = "ZFP_ACCURACY@0.01";
+
+    if (level == parent->finestLevel() && parent->finestLevel() > 0)
+    {
+      WriteMultiLevelPlotfileHDF5SingleDset(mt_final,
+                                  2,
+                                  amrex::GetVecOfConstPtrs(multiMf),
+                                  {"density", "xmom", "ymom", "zmom", "rho_e", "Temp", "phi_grav"},
+                                  multGeom,
+                                  cur_time,
+                                  Vector<int>(2, 0),
+                                  Vector<IntVect>(2, IntVect{AMREX_D_DECL(2,2,2)}),
+                                  compression);
+    }
+
     //
     // Use the Full pathname when naming the MultiFab.
     //
@@ -359,9 +388,16 @@ AmrLevel::writePlotFile (const std::string& dir,
     TheFullPath += BaseName;
     if (AsyncOut::UseAsyncOut()) {
         VisMF::AsyncWrite(plotMF,TheFullPath);
+        std::cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: " << level << std::endl;
     } else {
         VisMF::Write(plotMF,TheFullPath,how,true);
+        std::cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!: " << level << std::endl;
     }
+    // std::string sg_final = dir_final + "_lvl_" + std::to_string(level);
+    std::string sg_final = dir_final + "_l" + std::to_string(level);
+    WriteSingleLevelPlotfileHDF5(sg_final,
+                          plotMF, {"density", "xmom", "ymom", "zmom", "rho_e", "Temp", "phi_grav"},
+                          Geom(), cur_time, nStep());
 
     levelDirectoryCreated = false;  // ---- now that the plotfile is finished
 }
